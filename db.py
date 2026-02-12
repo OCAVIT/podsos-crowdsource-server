@@ -2,7 +2,8 @@
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+import os
+from pathlib import Path
 from typing import Optional
 
 import asyncpg
@@ -35,10 +36,20 @@ def compute_strategy_hash(zapret_args: list[str]) -> str:
 
 
 async def init_pool() -> None:
-    """Создаёт пул подключений к PostgreSQL."""
+    """Создаёт пул подключений к PostgreSQL и применяет init.sql."""
     global _pool
     _pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
     logger.info("DB pool created")
+
+    # Авто-миграция: выполняем init.sql при каждом старте
+    init_sql_path = Path(__file__).parent / "init.sql"
+    if init_sql_path.exists():
+        sql = init_sql_path.read_text(encoding="utf-8")
+        async with _pool.acquire() as conn:
+            await conn.execute(sql)
+        logger.info("init.sql applied successfully")
+    else:
+        logger.warning("init.sql not found at %s", init_sql_path)
 
 
 async def close_pool() -> None:
