@@ -2,7 +2,7 @@
 
 import hashlib
 import logging
-import os
+import ssl
 from pathlib import Path
 from typing import Optional
 
@@ -38,7 +38,22 @@ def compute_strategy_hash(zapret_args: list[str]) -> str:
 async def init_pool() -> None:
     """Создаёт пул подключений к PostgreSQL и применяет init.sql."""
     global _pool
-    _pool = await asyncpg.create_pool(DATABASE_URL, min_size=2, max_size=10)
+
+    # Railway Postgres требует SSL
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    masked_url = DATABASE_URL[:25] + "***" if len(DATABASE_URL) > 25 else "???"
+    logger.info("Connecting to DB: %s", masked_url)
+
+    _pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        min_size=2,
+        max_size=10,
+        ssl=ssl_ctx,
+        command_timeout=30,
+    )
     logger.info("DB pool created")
 
     # Авто-миграция: выполняем init.sql при каждом старте
