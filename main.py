@@ -1,12 +1,13 @@
 """Сервер краудсорсинга стратегий обхода DPI — FastAPI на Railway."""
 
+import asyncio
 import logging
 
 from fastapi import FastAPI, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 import db
-from config import CRON_SECRET
+from config import MAINTENANCE_TOKEN
 from models import (
     CleanupResponse,
     HealthResponse,
@@ -39,14 +40,34 @@ app.add_middleware(
 # Lifecycle
 # -------------------------------------------------------------------
 
+_CLEANUP_INTERVAL_SEC: int = 24 * 60 * 60  # 24 часа
+_cleanup_task: asyncio.Task | None = None
+
+
+async def _periodic_cleanup() -> None:
+    """Фоновый цикл: cleanup каждые 24 часа."""
+    while True:
+        await asyncio.sleep(_CLEANUP_INTERVAL_SEC)
+        try:
+            stale, degraded = await db.run_cleanup()
+            logger.info("Auto-cleanup done: stale=%d, degraded=%d", stale, degraded)
+        except Exception as exc:
+            logger.error("Auto-cleanup failed: %s", exc)
+
+
 @app.on_event("startup")
 async def startup():
+    global _cleanup_task
     await db.init_pool()
-    logger.info("Server started")
+    _cleanup_task = asyncio.create_task(_periodic_cleanup())
+    logger.info("Server started (auto-cleanup every %ds)", _CLEANUP_INTERVAL_SEC)
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    global _cleanup_task
+    if _cleanup_task is not None:
+        _cleanup_task.cancel()
     await db.close_pool()
     logger.info("Server stopped")
 
@@ -178,11 +199,11 @@ async def health():
 
 @app.post("/maintenance/cleanup", response_model=CleanupResponse)
 async def maintenance_cleanup(
-    x_cron_secret: str = Header(..., alias="X-Cron-Secret"),
+    x_maintenance_token: str = Header(..., alias="X-Maintenance-Token"),
 ):
     """Cron-задача: пометить stale и degraded стратегии."""
-    if x_cron_secret != CRON_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid cron secret")
+    if x_maintenance_token != MAINTENANCE_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid maintenance token")
 
     stale_marked, degraded_marked = await db.run_cleanup()
 

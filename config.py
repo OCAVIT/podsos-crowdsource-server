@@ -7,7 +7,7 @@ DATABASE_URL: str = os.environ.get(
     "postgresql://localhost:5432/podsos_crowd",
 )
 
-CRON_SECRET: str = os.environ.get("CRON_SECRET", "change-me-in-production")
+MAINTENANCE_TOKEN: str = os.environ.get("MAINTENANCE_TOKEN", "change-me-in-production")
 
 MAX_REPORTS_PER_HOUR: int = int(os.environ.get("MAX_REPORTS_PER_HOUR", "10"))
 
